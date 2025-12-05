@@ -6,7 +6,6 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Http\Client\Response;
-use Illuminate\Support\Str;
 use RuntimeException;
 
 class MainApiService
@@ -89,8 +88,15 @@ class MainApiService
         // caching
         if ($this->cacheEnabled && $this->cacheTtl > 0) {
             $cached = Cache::get($cacheKey);
-            if ($cached instanceof Response) {
-                return $cached;
+            if (is_array($cached)) {
+                // buat Response palsu dari cached array
+                return new \Illuminate\Http\Client\Response(
+                    new \GuzzleHttp\Psr7\Response(
+                        200,
+                        ['Content-Type' => 'application/json'],
+                        json_encode($cached)
+                    )
+                );
             }
         }
 
@@ -99,21 +105,19 @@ class MainApiService
 
         $http = Http::withHeaders($headers);
 
-        // ⬅️ Accept JSON only if needed
         if (($options['accept_json'] ?? false) === true) {
             $http = $http->acceptJson();
         }
 
-        // only valid cURL options passed here
         unset($options['accept_json']);
-
         $http = $http->withOptions(array_merge($this->httpOptions, $options));
 
         $response = $http->retry($this->retryAttempts, $this->retrySleep)
             ->get($url, $query);
 
         if ($this->cacheEnabled && $this->cacheTtl > 0 && $response->successful()) {
-            Cache::put($cacheKey, $response, $this->cacheTtl);
+            // simpan data json saja, bukan object Response
+            Cache::put($cacheKey, $response->json(), $this->cacheTtl);
         }
 
         return $response;
